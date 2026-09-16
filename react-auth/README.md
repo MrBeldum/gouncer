@@ -36,9 +36,7 @@ const client = createAuthQueryClient()
 - The client calls same-origin `/api/auth/*` and `/api/users` paths. In
   development, proxy `/api` to your backend so the `__Host-` session
   cookie is first-party.
-- `/wpds` needs the `@wordpress/ui` peer and, on React 19, a
-  `@wordpress/element` patch stubbing the react-dom exports React 19
-  removed. See `patches/` in this package's repository directory.
+- `/wpds` needs the `@wordpress/ui` peer.
 
 ## License
 

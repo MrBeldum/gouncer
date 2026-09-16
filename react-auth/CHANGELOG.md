@@ -10,6 +10,18 @@ Releases are tagged `react-auth@X.Y.Z` and publish to npm from CI. The
 npm-style tag stays invisible to the Go toolchain, unlike a
 `react-auth/vX.Y.Z` tag naming the directory's stub module.
 
+## [Unreleased]
+
+### Changed
+
+- The design system window moves to `@wordpress/ui` 0.22 and
+  `@wordpress/theme` 2.1, and `@wordpress/i18n` starts at 6.28.
+
+### Removed
+
+- The React 19 patch for `@wordpress/element`. Delete your copy and its
+  `patchedDependencies` entry.
+
 ## [0.8.0] - 2026-08-30
 
 ### Added
