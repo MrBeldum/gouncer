@@ -3,12 +3,16 @@
 package postgres_test
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/peterldowns/pgtestdb"
+	"github.com/pressly/goose/v3/lock"
 
 	"github.com/gopherium/gouncer"
 	"github.com/gopherium/gouncer/authkit/postgres"
@@ -77,6 +81,58 @@ func TestMigrateUsesItsOwnVersionTable(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("auth.goose_db_version tables = %d, want 1 (the module's own lineage)", count)
+	}
+}
+
+func TestMigrateWaitsForTheMigrationLock(t *testing.T) {
+	t.Parallel()
+
+	databaseURL := freshDatabaseURL(t)
+	db, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	holder, err := db.Conn(t.Context())
+	if err != nil {
+		t.Fatalf("taking a connection: %v", err)
+	}
+	defer func() { _ = holder.Close() }()
+	if _, err := holder.ExecContext(t.Context(), "SELECT pg_advisory_lock($1)", lock.DefaultLockID); err != nil {
+		t.Fatalf("holding the migration lock: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	err = postgres.Migrate(ctx, databaseURL)
+
+	var created bool
+	if scanErr := db.QueryRow("SELECT to_regnamespace('auth') IS NOT NULL").Scan(&created); scanErr != nil {
+		t.Fatalf("looking up the auth schema: %v", scanErr)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || created {
+		t.Errorf("Migrate() = %v with the auth schema created %v, want the deadline and nothing created", err, created)
+	}
+}
+
+func TestMigrateLetsRunsAtOnceAllSucceed(t *testing.T) {
+	t.Parallel()
+
+	databaseURL := freshDatabaseURL(t)
+	failures := make(chan error, 4)
+	var runs sync.WaitGroup
+	for range 4 {
+		runs.Go(func() {
+			failures <- postgres.Migrate(t.Context(), databaseURL)
+		})
+	}
+	runs.Wait()
+	close(failures)
+
+	for err := range failures {
+		if err != nil {
+			t.Errorf("Migrate() error = %v, want every run to succeed", err)
+		}
 	}
 }
 

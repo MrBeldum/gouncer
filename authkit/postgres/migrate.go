@@ -11,6 +11,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
+	"github.com/pressly/goose/v3/lock"
 )
 
 var migrationSource = mustSub(Migrations, "migrations")
@@ -41,17 +42,42 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("postgres: migration store: %w", err)
 	}
-	provider, err := goose.NewProvider("", db, migrationSource, goose.WithStore(store))
+	locker := mustLocker(lock.NewPostgresSessionLocker())
+	provider, err := goose.NewProvider("", db, migrationSource, goose.WithStore(store), goose.WithSessionLocker(locker))
 	if err != nil {
 		return fmt.Errorf("postgres: migration provider: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS auth"); err != nil {
+	if err := createSchema(ctx, db); err != nil {
 		return fmt.Errorf("postgres: create schema: %w", err)
 	}
 	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("postgres: apply migrations: %w", err)
 	}
 	return nil
+}
+
+// createSchema creates the auth schema while its transaction holds goose's migration lock.
+func createSchema(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lock.DefaultLockID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS auth"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// mustLocker returns locker and panics if goose could not build it.
+func mustLocker(locker lock.SessionLocker, err error) lock.SessionLocker {
+	if err != nil {
+		panic(err)
+	}
+	return locker
 }
 
 // mustSub returns the dir subtree of fsys and panics if it cannot be created.

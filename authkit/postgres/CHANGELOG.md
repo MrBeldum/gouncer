@@ -8,6 +8,13 @@ releases may contain breaking changes.
 
 Releases of this module are tagged `authkit/postgres/vX.Y.Z`.
 
+## [Unreleased]
+
+### Fixed
+
+- `Migrate` creates the auth schema and applies its migrations under
+  goose's Postgres migration lock, so two processes never do it together.
+
 ## [0.11.0] - 2026-09-02
 
 ### Added
