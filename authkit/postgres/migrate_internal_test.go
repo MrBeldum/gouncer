@@ -3,6 +3,7 @@
 package postgres
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -20,6 +21,19 @@ func TestMigrateDatabaseRequiresRegisteredDriver(t *testing.T) {
 	if err := migrateDatabase(t.Context(), "no-such-driver", "ignored"); err == nil {
 		t.Fatal("migrateDatabase() error = nil, want an unknown driver error")
 	}
+}
+
+func TestMustLockerPanicsOnALockerItCannotBuild(t *testing.T) {
+	t.Parallel()
+
+	failed := errors.New("no locker")
+	defer func() {
+		if recovered := recover(); recovered != failed {
+			t.Fatalf("recovered %v, want the error", recovered)
+		}
+	}()
+
+	mustLocker(nil, failed)
 }
 
 func TestMustSubRejectsInvalidDir(t *testing.T) {

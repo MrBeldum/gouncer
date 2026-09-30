@@ -3,12 +3,14 @@
 package postgres_test
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/peterldowns/pgtestdb"
+	"github.com/pressly/goose/v3/lock"
 
 	"github.com/gopherium/gouncer"
 	"github.com/gopherium/gouncer/authkit/postgres"
@@ -77,6 +79,37 @@ func TestMigrateUsesItsOwnVersionTable(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("auth.goose_db_version tables = %d, want 1 (the module's own lineage)", count)
+	}
+}
+
+func TestMigrateWaitsForTheMigrationLock(t *testing.T) {
+	t.Parallel()
+
+	databaseURL := freshDatabaseURL(t)
+	db, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	holder, err := db.Conn(t.Context())
+	if err != nil {
+		t.Fatalf("taking a connection: %v", err)
+	}
+	defer func() { _ = holder.Close() }()
+	if _, err := holder.ExecContext(t.Context(), "SELECT pg_advisory_lock($1)", lock.DefaultLockID); err != nil {
+		t.Fatalf("holding the migration lock: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	err = postgres.Migrate(ctx, databaseURL)
+
+	var applied bool
+	if scanErr := db.QueryRow("SELECT to_regclass('auth.users') IS NOT NULL").Scan(&applied); scanErr != nil {
+		t.Fatalf("looking up auth.users: %v", scanErr)
+	}
+	if err == nil || applied {
+		t.Errorf("Migrate() = %v with auth.users applied %v, want it to wait for the lock and apply nothing", err, applied)
 	}
 }
 

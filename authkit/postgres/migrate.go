@@ -11,6 +11,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
+	"github.com/pressly/goose/v3/lock"
 )
 
 var migrationSource = mustSub(Migrations, "migrations")
@@ -41,7 +42,8 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("postgres: migration store: %w", err)
 	}
-	provider, err := goose.NewProvider("", db, migrationSource, goose.WithStore(store))
+	locker := mustLocker(lock.NewPostgresSessionLocker())
+	provider, err := goose.NewProvider("", db, migrationSource, goose.WithStore(store), goose.WithSessionLocker(locker))
 	if err != nil {
 		return fmt.Errorf("postgres: migration provider: %w", err)
 	}
@@ -52,6 +54,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("postgres: apply migrations: %w", err)
 	}
 	return nil
+}
+
+// mustLocker returns locker and panics if goose could not build it.
+func mustLocker(locker lock.SessionLocker, err error) lock.SessionLocker {
+	if err != nil {
+		panic(err)
+	}
+	return locker
 }
 
 // mustSub returns the dir subtree of fsys and panics if it cannot be created.
