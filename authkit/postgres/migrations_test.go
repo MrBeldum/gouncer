@@ -5,7 +5,9 @@ package postgres_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,12 +106,33 @@ func TestMigrateWaitsForTheMigrationLock(t *testing.T) {
 
 	err = postgres.Migrate(ctx, databaseURL)
 
-	var applied bool
-	if scanErr := db.QueryRow("SELECT to_regclass('auth.users') IS NOT NULL").Scan(&applied); scanErr != nil {
-		t.Fatalf("looking up auth.users: %v", scanErr)
+	var created bool
+	if scanErr := db.QueryRow("SELECT to_regnamespace('auth') IS NOT NULL").Scan(&created); scanErr != nil {
+		t.Fatalf("looking up the auth schema: %v", scanErr)
 	}
-	if err == nil || applied {
-		t.Errorf("Migrate() = %v with auth.users applied %v, want it to wait for the lock and apply nothing", err, applied)
+	if !errors.Is(err, context.DeadlineExceeded) || created {
+		t.Errorf("Migrate() = %v with the auth schema created %v, want the deadline and nothing created", err, created)
+	}
+}
+
+func TestMigrateLetsRunsAtOnceAllSucceed(t *testing.T) {
+	t.Parallel()
+
+	databaseURL := freshDatabaseURL(t)
+	failures := make(chan error, 4)
+	var runs sync.WaitGroup
+	for range 4 {
+		runs.Go(func() {
+			failures <- postgres.Migrate(t.Context(), databaseURL)
+		})
+	}
+	runs.Wait()
+	close(failures)
+
+	for err := range failures {
+		if err != nil {
+			t.Errorf("Migrate() error = %v, want every run to succeed", err)
+		}
 	}
 }
 
