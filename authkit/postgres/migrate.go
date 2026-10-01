@@ -42,13 +42,11 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("postgres: migration store: %w", err)
 	}
+	versions := schemaStore{store.(database.StoreExtender)}
 	locker := mustLocker(lock.NewPostgresSessionLocker())
-	provider, err := goose.NewProvider("", db, migrationSource, goose.WithStore(store), goose.WithSessionLocker(locker))
+	provider, err := goose.NewProvider("", db, migrationSource, goose.WithStore(versions), goose.WithSessionLocker(locker))
 	if err != nil {
 		return fmt.Errorf("postgres: migration provider: %w", err)
-	}
-	if err := createSchema(ctx, db); err != nil {
-		return fmt.Errorf("postgres: create schema: %w", err)
 	}
 	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("postgres: apply migrations: %w", err)
@@ -56,20 +54,17 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// createSchema creates the auth schema while its transaction holds goose's migration lock.
-func createSchema(ctx context.Context, db *sql.DB) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+// schemaStore is goose's version store, creating the auth schema along with the version table.
+type schemaStore struct {
+	database.StoreExtender
+}
+
+// CreateVersionTable creates the auth schema, then the version table inside it.
+func (s schemaStore) CreateVersionTable(ctx context.Context, db database.DBTxConn) error {
+	if _, err := db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS auth"); err != nil {
+		return fmt.Errorf("create the auth schema: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lock.DefaultLockID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS auth"); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.StoreExtender.CreateVersionTable(ctx, db)
 }
 
 // mustLocker returns locker and panics if goose could not build it.
