@@ -84,7 +84,76 @@ func TestMigrateUsesItsOwnVersionTable(t *testing.T) {
 	}
 }
 
+// lockedDatabase returns a fresh database, a handle on it and a connection holding goose's migration lock.
+func lockedDatabase(t *testing.T) (string, *sql.DB, *sql.Conn) {
+	t.Helper()
+	databaseURL := freshDatabaseURL(t)
+	db, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	holder, err := db.Conn(t.Context())
+	if err != nil {
+		t.Fatalf("taking a connection: %v", err)
+	}
+	t.Cleanup(func() { _ = holder.Close() })
+	if _, err := holder.ExecContext(t.Context(), "SELECT pg_advisory_lock($1)", lock.DefaultLockID); err != nil {
+		t.Fatalf("holding the migration lock: %v", err)
+	}
+	return databaseURL, db, holder
+}
+
+// backendPID returns the Postgres process serving conn.
+func backendPID(t *testing.T, conn *sql.Conn) int32 {
+	t.Helper()
+	var pid int32
+	if err := conn.QueryRowContext(t.Context(), "SELECT pg_backend_pid()").Scan(&pid); err != nil {
+		t.Fatalf("reading the connection's process: %v", err)
+	}
+	return pid
+}
+
+// awaitSession returns once a session of db other than holder has column like pattern, failing if ran ends first.
+func awaitSession(t *testing.T, db *sql.DB, holder int32, ran <-chan error, column, pattern string) {
+	t.Helper()
+	lookup := "SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database()" +
+		" AND pid NOT IN (pg_backend_pid(), $1) AND " + column + " LIKE $2)"
+	for {
+		var found bool
+		if err := db.QueryRowContext(t.Context(), lookup, holder, pattern).Scan(&found); err != nil {
+			t.Fatalf("looking for the session: %v", err)
+		}
+		if found {
+			return
+		}
+		select {
+		case err := <-ran:
+			t.Fatalf("Migrate() = %v before a session had %s like %s", err, column, pattern)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func TestMigrateWaitsForTheMigrationLock(t *testing.T) {
+	t.Parallel()
+
+	databaseURL, db, _ := lockedDatabase(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	err := postgres.Migrate(ctx, databaseURL)
+
+	var created bool
+	if scanErr := db.QueryRow("SELECT to_regclass('auth.users') IS NOT NULL").Scan(&created); scanErr != nil {
+		t.Fatalf("looking up the users table: %v", scanErr)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || created {
+		t.Errorf("Migrate() = %v with the users table created %v, want the deadline and no migration", err, created)
+	}
+}
+
+func TestMigrateSucceedsWhenAnotherSessionCreatesTheSchemaFirst(t *testing.T) {
 	t.Parallel()
 
 	databaseURL := freshDatabaseURL(t)
@@ -98,20 +167,67 @@ func TestMigrateWaitsForTheMigrationLock(t *testing.T) {
 		t.Fatalf("taking a connection: %v", err)
 	}
 	defer func() { _ = holder.Close() }()
-	if _, err := holder.ExecContext(t.Context(), "SELECT pg_advisory_lock($1)", lock.DefaultLockID); err != nil {
-		t.Fatalf("holding the migration lock: %v", err)
+	pid := backendPID(t, holder)
+	tx, err := holder.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("beginning: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-	defer cancel()
-
-	err = postgres.Migrate(ctx, databaseURL)
-
-	var created bool
-	if scanErr := db.QueryRow("SELECT to_regnamespace('auth') IS NOT NULL").Scan(&created); scanErr != nil {
-		t.Fatalf("looking up the auth schema: %v", scanErr)
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(t.Context(), "CREATE SCHEMA auth"); err != nil {
+		t.Fatalf("creating the auth schema: %v", err)
 	}
-	if !errors.Is(err, context.DeadlineExceeded) || created {
-		t.Errorf("Migrate() = %v with the auth schema created %v, want the deadline and nothing created", err, created)
+	ran := make(chan error, 1)
+	go func() { ran <- postgres.Migrate(t.Context(), databaseURL) }()
+	awaitSession(t, db, pid, ran, "wait_event_type", "Lock")
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("committing the auth schema: %v", err)
+	}
+
+	if err := <-ran; err != nil {
+		t.Errorf("Migrate() = %v, want it to succeed", err)
+	}
+}
+
+func TestMigrateLetsAConcurrentIndexBuildFinishWhileItWaits(t *testing.T) {
+	t.Parallel()
+
+	databaseURL, db, holder := lockedDatabase(t)
+	if _, err := holder.ExecContext(t.Context(), "CREATE TABLE items (x int)"); err != nil {
+		t.Fatalf("creating the indexed table: %v", err)
+	}
+	ran := make(chan error, 1)
+	go func() { ran <- postgres.Migrate(t.Context(), databaseURL) }()
+	awaitSession(t, db, backendPID(t, holder), ran, "query", "%advisory%")
+
+	_, built := holder.ExecContext(t.Context(), "CREATE INDEX CONCURRENTLY items_x ON items (x)")
+	if _, err := holder.ExecContext(t.Context(), "SELECT pg_advisory_unlock($1)", lock.DefaultLockID); err != nil {
+		t.Fatalf("releasing the migration lock: %v", err)
+	}
+
+	if err := <-ran; built != nil || err != nil {
+		t.Errorf("index build = %v and Migrate() = %v, want both to finish", built, err)
+	}
+}
+
+func TestMigrateNamesASchemaItCannotCreate(t *testing.T) {
+	t.Parallel()
+
+	databaseURL := freshDatabaseURL(t)
+	db, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("DO $$ BEGIN EXECUTE format(" +
+		"'ALTER DATABASE %I SET default_transaction_read_only = on', current_database()); END $$"); err != nil {
+		t.Fatalf("making the database read only: %v", err)
+	}
+
+	err = postgres.Migrate(t.Context(), databaseURL)
+
+	if err == nil || !strings.Contains(err.Error(), "create the auth schema: ") {
+		t.Errorf("Migrate() = %v, want the auth schema named", err)
 	}
 }
 
