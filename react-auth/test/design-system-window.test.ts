@@ -11,9 +11,9 @@ const manifest = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as {
 const numeric = { numeric: true }
 
 test('declares the design system window this build is tested against', () => {
-	expect(manifest.peerDependencies['@wordpress/ui']).toBe('>=0.22.0 <0.23.0')
-	expect(manifest.peerDependencies['@wordpress/theme']).toBe('>=2.1.0 <3.0.0')
-	expect(manifest.peerDependencies['@wordpress/i18n']).toBe('>=6.28.0 <7.0.0')
+	expect(manifest.peerDependencies['@wordpress/ui']).toBe('>=0.23.0 <0.24.0')
+	expect(manifest.peerDependencies['@wordpress/theme']).toBe('>=2.2.0 <3.0.0')
+	expect(manifest.peerDependencies['@wordpress/i18n']).toBe('>=6.29.0 <7.0.0')
 })
 
 test.each(['@wordpress/i18n', '@wordpress/theme', '@wordpress/ui'])('pins %s inside its peer window', (name) => {
