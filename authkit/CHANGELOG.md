@@ -16,6 +16,8 @@ Releases of this module are tagged `authkit/vX.Y.Z`.
   `request_cross_origin`.
 - Each refused write logs `write refused` with the reason `fetch-site`
   or `origin`.
+- The guard reads no forwarded headers, so a reverse proxy must keep the
+  visitor's `Host`.
 
 ## [0.15.0] - 2026-08-31
 
