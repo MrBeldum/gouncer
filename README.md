@@ -75,7 +75,10 @@ err = store.DeleteSession(ctx, gouncer.HashToken(token))
 - Rate limit your login endpoint. Password verification is expensive by
   design.
 - Refuse cross-origin browser writes at the root of your router, before
-  any route, for example with `authkit.CrossOriginGuard`.
+  any route, for example with `authkit.CrossOriginGuard`. Never change
+  data on `GET`, `HEAD` or `OPTIONS`, which it lets through.
+- Send `Strict-Transport-Security` from your HTTPS site. An older browser
+  without `Sec-Fetch-Site` is judged by host alone, never by scheme.
 
 The [batteries](#batteries) implement these notes as maintained modules.
 Adopt them or keep the notes as your checklist.
