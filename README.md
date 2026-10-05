@@ -80,8 +80,9 @@ err = store.DeleteSession(ctx, gouncer.HashToken(token))
 - Send `Strict-Transport-Security` from your HTTPS site. An older browser
   without `Sec-Fetch-Site` is judged by host alone, never by scheme.
 - Behind a reverse proxy, pass the visitor's `Host` header through
-  unchanged. The guard reads no forwarded headers, so an older browser
-  behind a proxy that rewrites `Host` has its writes refused.
+  unchanged. The guard reads no forwarded headers, so a browser that
+  sends `Origin` without `Sec-Fetch-Site` has its writes refused behind a
+  proxy that rewrites `Host`.
 
 The [batteries](#batteries) implement these notes as maintained modules.
 Adopt them or keep the notes as your checklist.
