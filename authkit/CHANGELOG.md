@@ -7,6 +7,20 @@ minor releases may contain breaking changes.
 
 Releases of this module are tagged `authkit/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `CrossOriginGuard` and `CrossOriginConfig`, root middleware on
+  `http.NewCrossOriginProtection` that refuses browser writes from
+  another origin with a 403 and the code `request_cross_origin`.
+- A browser sending only `Origin` is judged by scheme, host and port,
+  with `X-Forwarded-Host` and `X-Forwarded-Proto` read only from
+  `TrustedProxies`, the ranges `ratelimit.ParseTrustedProxies` returns.
+- An optional `PublicURL` refuses every write sent to another address.
+- Each refused write logs `write refused` with the reason `fetch-site`,
+  `origin`, `host` or `scheme`.
+
 ## [0.15.0] - 2026-08-31
 
 ### Added
