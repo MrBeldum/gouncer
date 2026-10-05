@@ -30,7 +30,7 @@ independent building blocks. You adopt only what you need.
 
 Ready-made batteries live in this repository as separately versioned modules:
 
-- [`authkit`](authkit/) serves gouncer sessions over HTTP.
+- [`authkit`](authkit/) serves gouncer sessions over HTTP and refuses cross-origin browser writes.
 - [`authkit/postgres`](authkit/postgres/) persists users and sessions in a PostgreSQL schema of its own.
 - [`authkit/ratelimit`](authkit/ratelimit/) limits failed login attempts per client IP.
 - [`react-auth`](react-auth/) is the npm client, `@gopherium/react-auth`, for React frontends.
@@ -74,6 +74,15 @@ err = store.DeleteSession(ctx, gouncer.HashToken(token))
   the `__Host-` prefix. Never log the plain token.
 - Rate limit your login endpoint. Password verification is expensive by
   design.
+- Refuse cross-origin browser writes at the root of your router, before
+  any route, for example with `authkit.CrossOriginGuard`. Never change
+  data on `GET`, `HEAD` or `OPTIONS`, which it lets through.
+- Send `Strict-Transport-Security` from your HTTPS site. An older browser
+  without `Sec-Fetch-Site` is judged by host alone, never by scheme.
+- Behind a reverse proxy, pass the visitor's `Host` header through
+  unchanged. The guard reads no forwarded headers, so a browser that
+  sends `Origin` without `Sec-Fetch-Site` has its writes refused behind a
+  proxy that rewrites `Host`.
 
 The [batteries](#batteries) implement these notes as maintained modules.
 Adopt them or keep the notes as your checklist.

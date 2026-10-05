@@ -7,6 +7,18 @@ minor releases may contain breaking changes.
 
 Releases of this module are tagged `authkit/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `CrossOriginGuard`, root middleware on `http.NewCrossOriginProtection`
+  that refuses cross-origin browser writes with a 403 and the code
+  `request_cross_origin`.
+- Each refused write logs `write refused` with the reason `fetch-site`
+  or `origin`.
+- The guard reads no forwarded headers, so a reverse proxy must keep the
+  visitor's `Host`.
+
 ## [0.15.0] - 2026-08-31
 
 ### Added
