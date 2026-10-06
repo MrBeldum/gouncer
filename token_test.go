@@ -70,7 +70,6 @@ func TestNewTokenRejectsAnEmptyPurpose(t *testing.T) {
 	}
 }
 
-
 func TestNewTokenRejectsANilUserID(t *testing.T) {
 	t.Parallel()
 
@@ -80,6 +79,7 @@ func TestNewTokenRejectsANilUserID(t *testing.T) {
 		t.Errorf("NewToken() error = %v, want ErrNilUserID", err)
 	}
 }
+
 func TestNewTokenRejectsANonPositiveLifetime(t *testing.T) {
 	t.Parallel()
 
